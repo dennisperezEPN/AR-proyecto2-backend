@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from controller import run_snmp_get, run_snmp_getnext
+from pydantic import BaseModel
+from controller import run_snmp_get, run_snmp_getnext, run_snmp_set
 import asyncio
 
 app = FastAPI()
@@ -46,5 +47,34 @@ async def snmp_getnext(ip: str, user: str, oid: str):
     try:
         result = await run_snmp_getnext(ip, user, oid)
         return {"snmp_next_result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# --- Endpoint SNMP SET ---
+class SNMPSetRequest(BaseModel):
+    ip: str
+    user: str
+    oid: str
+    value: str
+    type: str   # Debe coincidir con uno de los keys de type_map en run_snmp_set
+
+@app.post("/snmp/set")
+async def snmp_set(req: SNMPSetRequest):
+    """
+    Endpoint para realizar SNMPv3 SET.
+    Body JSON:
+    {
+      "ip": "192.168.1.1",
+      "user": "v3user",
+      "oid": "1.3.6.1.2.1.1.5.0",
+      "value": "MyDeviceName",
+      "type": "OctetString"
+    }
+    """
+    try:
+        result = await run_snmp_set(req.ip, req.user, req.oid, req.value, req.type)
+        return {"snmp_set_result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
