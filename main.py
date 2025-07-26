@@ -2,12 +2,20 @@ import threading
 import asyncio
 import json
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from typing import Optional
 
 from controller import run_snmp_get, run_snmp_getnext, run_snmp_set
+
+# PySNMP v3 Protocol Constants
+from pysnmp.hlapi.v3arch.asyncio import (
+    usmNoAuthProtocol, usmNoPrivProtocol,
+    usmHMACMD5AuthProtocol, usmHMACSHAAuthProtocol,
+    usmDESPrivProtocol, usmAesCfb128Protocol
+)
 
 # PySNMP de bajo nivel para el listener de traps
 from pysnmp.entity import engine, config
@@ -18,6 +26,7 @@ app = FastAPI()
 
 origins = [
     "http://localhost:8080",
+    "http://localhost:8000",
     "http://127.0.0.1:8080",
     # otros orígenes que necesites...
 ]
@@ -29,6 +38,16 @@ app.add_middleware(
     allow_methods=["*"],           # GET, POST, PUT, etc.
     allow_headers=["*"],           # Authorization, Content-Type, etc.
 )
+
+# Mapeos para convertir strings del frontend a constantes PySNMP
+AUTH_PROTOCOLS = {
+    "MD5": usmHMACMD5AuthProtocol,
+    "SHA": usmHMACSHAAuthProtocol,
+}
+PRIV_PROTOCOLS = {
+    "DES": usmDESPrivProtocol,
+    "AES": usmAesCfb128Protocol,
+}
 
 # Cola compartida y loop del evento para comunicar hilo ↔ asyncio
 trap_queue: asyncio.Queue
@@ -106,7 +125,19 @@ async def root():
 
 
 @app.get("/snmp/get")
-async def snmp_get(ip: str, user: str, oid: str):
+async def snmp_get(
+        ip: str, 
+        user: str, 
+        oid: str,
+        security_level: str = Query(
+            "noAuthNoPriv",
+            description="Nivel SNMPv3: noAuthNoPriv | authNoPriv | authPriv"
+        ),
+        auth_key: Optional[str] = Query(None, description="Clave de autenticación"),
+        auth_protocol: str = Query("MD5", description="MD5 | SHA"),
+        priv_key: Optional[str] = Query(None, description="Clave de privacidad"),
+        priv_protocol: str = Query("DES", description="DES | AES"),
+):
     """
     Endpoint para obtener OID via SNMPv3 asincrono.
 
@@ -115,12 +146,42 @@ async def snmp_get(ip: str, user: str, oid: str):
         - user: usuario SNMPv3
     """
 
+    # Validaciones
+    if security_level not in ("noAuthNoPriv", "authNoPriv", "authPriv"):
+        raise HTTPException(400, "Nivel de seguridad inválido")
+    if security_level in ("authNoPriv","authPriv") and not auth_key:
+        raise HTTPException(400, "Se requiere auth_key")
+    if security_level == "authPriv" and not priv_key:
+        raise HTTPException(400, "Se requiere priv_key")
+
+    # Mapear cadenas a constantes PySNMP
+    auth_proto = AUTH_PROTOCOLS.get(auth_protocol, usmNoAuthProtocol)
+    priv_proto = PRIV_PROTOCOLS.get(priv_protocol, usmNoPrivProtocol)
+
+    print("parametros que se envian a la funcion run_snmp_get: ", ip, user, oid, security_level, auth_key, auth_protocol, priv_key, priv_protocol)
+
     try:
-        result = await run_snmp_get(ip, user, oid)
+        if security_level == "noAuthNoPriv":
+            result = await run_snmp_get(
+                ip=ip,
+                user=user,
+                oid_numeric=oid,
+                security_level=security_level,
+            )
+        else:
+            result = await run_snmp_get(
+                ip=ip,
+                user=user,
+                oid_numeric=oid,
+                security_level=security_level,
+                auth_key=auth_key,
+                auth_protocol=auth_proto,
+                priv_key=priv_key,
+                priv_protocol=priv_proto
+            )
         return {"snmp_result": result}
     except Exception as e:
-        raise HTTPException(status_code = 500, detail = str(e))
-
+        raise HTTPException(status_code=500, detail=str(e)) 
 
 @app.get("/snmp/getnext")
 async def snmp_getnext(ip: str, user: str, oid: str):

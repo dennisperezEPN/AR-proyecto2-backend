@@ -5,14 +5,69 @@ from pysnmp.proto.rfc1902 import (
     Gauge32, TimeTicks, Opaque, Counter64, Bits
 )
 
-async def run_snmp_get(ip, user, oid_numeric):
-    iterator = await get_cmd(
-        SnmpEngine(),
-        UsmUserData(user, authProtocol = usmNoAuthProtocol, privProtocol = usmNoPrivProtocol),
-        await UdpTransportTarget.create((ip, 161)),
-        ContextData(),
-        ObjectType(ObjectIdentity(oid_numeric))
-    )
+async def run_snmp_get(
+        ip, 
+        user, 
+        oid_numeric,
+        *,
+        security_level: str = "noAuthNoPriv",
+        auth_key: str = None,
+        priv_key: str = None,
+        auth_protocol = usmNoAuthProtocol,
+        priv_protocol = usmNoPrivProtocol,
+):
+    # Se construyen los parametros de USM segun el nivel especificado
+    usm_kwargs = {}
+
+    if security_level == "authNoPriv":
+        if not auth_key:
+            raise ValueError("Para authNoPriv se debe proporcionar una auth_key")
+        usm_kwargs.update({
+            "authKey": auth_key,
+            "authProtocol": auth_protocol,
+        })
+    elif security_level == "authPriv":
+        if not auth_key or not priv_key:
+            raise ValueError("Para authPriv se debe proporcionar auth_key y priv_key")
+        usm_kwargs.update({
+            "authKey": auth_key,
+            "authProtocol": auth_protocol,
+            "privKey": priv_key,
+            "privProtocol": priv_protocol,
+        })
+
+    # 3) Creación de UsmUserData
+    try:
+        user_data = UsmUserData(user, **usm_kwargs)
+    except Exception as e:
+        # Aquí te dice si alguno de los parámetros está mal
+        print("[ERROR] al crear UsmUserData:", e)
+        traceback.print_exc()
+        raise
+
+    # 4) Ejecución del GET
+    try:
+        iterator = await get_cmd(
+            SnmpEngine(),
+            user_data,
+            await UdpTransportTarget.create((ip, 161)),
+            ContextData(),
+            ObjectType(ObjectIdentity(oid_numeric))
+        )
+        # --- DEBUG AÑADIDO ---
+        errorIndication, errorStatus, errorIndex, varBinds = iterator
+        print("[SNMP REPLY] errorIndication:", errorIndication)
+        print("[SNMP REPLY] errorStatus:   ", errorStatus and errorStatus.prettyPrint())
+        print("[SNMP REPLY] errorIndex:    ", errorIndex)
+        # Si hay varBinds aunque haya error, también los muestro
+        print("[SNMP REPLY] varBinds:      ", [
+            (oid.prettyPrint(), val.prettyPrint()) for oid, val in varBinds or []
+        ])
+        # --- FIN DEBUG ---
+    except Exception as e:
+        print("[ERROR] fallo interno en get_cmd:", e)
+        traceback.print_exc()
+        raise
 
     errorIndication, errorStatus, errorIndex, varBinds = iterator
 
