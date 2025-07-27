@@ -184,9 +184,50 @@ async def snmp_get(
         raise HTTPException(status_code=500, detail=str(e)) 
 
 @app.get("/snmp/getnext")
-async def snmp_getnext(ip: str, user: str, oid: str):
+async def snmp_getnext(
+        ip: str, 
+        user: str, 
+        oid: str,
+        security_level: str = Query(
+            "noAuthNoPriv",
+            description="Nivel SNMPv3: noAuthNoPriv | authNoPriv | authPriv"
+        ),
+        auth_key: Optional[str] = Query(None, description="Clave de autenticación"),
+        auth_protocol: str = Query("MD5", description="MD5 | SHA"),
+        priv_key: Optional[str] = Query(None, description="Clave de privacidad"),
+        priv_protocol: str = Query("DES", description="DES | AES"),
+):
+    # Validaciones
+    if security_level not in ("noAuthNoPriv", "authNoPriv", "authPriv"):
+        raise HTTPException(400, "Nivel de seguridad inválido")
+    if security_level in ("authNoPriv","authPriv") and not auth_key:
+        raise HTTPException(400, "Se requiere auth_key")
+    if security_level == "authPriv" and not priv_key:
+        raise HTTPException(400, "Se requiere priv_key")
+
+    # Mapear cadenas a constantes PySNMP
+    auth_proto = AUTH_PROTOCOLS.get(auth_protocol, usmNoAuthProtocol)
+    priv_proto = PRIV_PROTOCOLS.get(priv_protocol, usmNoPrivProtocol)
+
     try:
-        result = await run_snmp_getnext(ip, user, oid)
+        if security_level == "noAuthNoPriv":
+            result = await run_snmp_getnext(
+                ip=ip,
+                user=user,
+                oid_numeric=oid,
+                security_level=security_level,
+            )
+        else:
+            result = await run_snmp_getnext(
+                ip=ip,
+                user=user,
+                oid_numeric=oid,
+                security_level=security_level,
+                auth_key=auth_key,
+                auth_protocol=auth_proto,
+                priv_key=priv_key,
+                priv_protocol=priv_proto
+            )
         return {"snmp_next_result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
