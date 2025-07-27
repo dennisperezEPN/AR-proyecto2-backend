@@ -241,26 +241,71 @@ class SNMPSetRequest(BaseModel):
     oid: str
     value: str
     type: str   # Debe coincidir con uno de los keys de type_map en run_snmp_set
+    security_level: str = Query(
+        "noAuthNoPriv",
+        description="Nivel SNMPv3: noAuthNoPriv | authNoPriv | authPriv"
+    )
+    auth_key: Optional[str] = Query(None, description="Clave de autenticación")
+    auth_protocol: str = Query(
+        "MD5",
+        description="MD5 | SHA"
+    )
+    priv_key: Optional[str] = Query(None, description="Clave de privacidad")
+    priv_protocol: str = Query(
+        "DES",
+        description="DES | AES"
+    )
+
 
 @app.post("/snmp/set")
 async def snmp_set(req: SNMPSetRequest):
     """
-    Endpoint para realizar SNMPv3 SET.
-    Body JSON:
-    {
-      "ip": "192.168.1.1",
-      "user": "v3user",
-      "oid": "1.3.6.1.2.1.1.5.0",
-      "value": "MyDeviceName",
-      "type": "OctetString"
-    }
+    Realiza una operación SNMPv3 SET con soporte de niveles de seguridad:
+    noAuthNoPriv, authNoPriv, authPriv. 
     """
+
+    # 1) Validación del nivel de seguridad
+    lvl = req.security_level
+    if lvl not in ("noAuthNoPriv", "authNoPriv", "authPriv"):
+        raise HTTPException(status_code=400, detail="Nivel de seguridad inválido")
+    if lvl in ("authNoPriv", "authPriv") and not req.auth_key:
+        raise HTTPException(status_code=400, detail="Se requiere auth_key para este nivel de seguridad")
+    if lvl == "authPriv" and not req.priv_key:
+        raise HTTPException(status_code=400, detail="Se requiere priv_key para authPriv")
+
+
+    # 2) Mapear protocolos de cadena a constantes PySNMP
+    auth_proto = AUTH_PROTOCOLS.get(req.auth_protocol, usmNoAuthProtocol)
+    priv_proto = PRIV_PROTOCOLS.get(req.priv_protocol, usmNoPrivProtocol)
+
+
+    # 3) Llamada a la función run_snmp_set
     try:
-        result = await run_snmp_set(req.ip, req.user, req.oid, req.value, req.type)
+        if lvl == "noAuthNoPriv":
+            result = await run_snmp_set(
+                ip=req.ip,
+                user=req.user,
+                oid_numeric=req.oid,
+                value=req.value,
+                value_type=req.type,
+                security_level=lvl
+            )
+        else:
+            result = await run_snmp_set(
+                ip=req.ip,
+                user=req.user,
+                oid_numeric=req.oid,
+                value=req.value,
+                value_type=req.type,
+                security_level=lvl,
+                auth_key=req.auth_key,
+                auth_protocol=auth_proto,
+                priv_key=req.priv_key,
+                priv_protocol=priv_proto
+            )
         return {"snmp_set_result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 # --- Endpoint SSE para stream de traps ---
 @app.get("/traps/stream")

@@ -128,7 +128,7 @@ async def run_snmp_getnext(
         traceback.print_exc()
         raise
    
-    # 4) Ejecución del GET
+    # 4) Ejecución del GETNEXT
     try:
         iterator = await next_cmd(
             SnmpEngine(),
@@ -173,8 +173,19 @@ async def run_snmp_getnext(
         return result
         
 
-
-async def run_snmp_set(ip: str, user: str, oid_numeric: str, value: str, value_type: str):
+async def run_snmp_set(
+        ip: str,
+        user: str,
+        oid_numeric: str,
+        value: str,
+        value_type: str,
+        *,
+        security_level: str = "noAuthNoPriv",
+        auth_key: str = None,
+        priv_key: str = None,
+        auth_protocol=usmNoAuthProtocol,
+        priv_protocol=usmNoPrivProtocol,
+):
     """
     Realiza una operación SNMPv3 SET sobre un único OID.
     
@@ -190,6 +201,8 @@ async def run_snmp_set(ip: str, user: str, oid_numeric: str, value: str, value_t
     Retorna:
         Lista de strings con el OID = valor resultante tras el SET.
     """
+
+
     # Mapeo de tipos string a clases pysnmp
     type_map = {
         'Integer': Integer,
@@ -217,14 +230,48 @@ async def run_snmp_set(ip: str, user: str, oid_numeric: str, value: str, value_t
         # OctetString, IpAddress, Opaque, Bits aceptan string directamente
         cast_value = value
 
-    # Ejecuta el SET
-    iterator = await set_cmd(
-        SnmpEngine(),
-        UsmUserData(user, authProtocol=usmNoAuthProtocol, privProtocol=usmNoPrivProtocol),
-        await UdpTransportTarget.create((ip, 161)),
-        ContextData(),
-        ObjectType(ObjectIdentity(oid_numeric), pysnmp_type(cast_value))
-    )
+    # --- Construcción de parámetros USM según security_level ---
+    usm_kwargs = {}
+    if security_level == "authNoPriv":
+        if not auth_key:
+            raise ValueError("Para authNoPriv se debe proporcionar una auth_key")
+        usm_kwargs.update({
+            "authKey": auth_key,
+            "authProtocol": auth_protocol,
+        })
+    elif security_level == "authPriv":
+        if not auth_key or not priv_key:
+            raise ValueError("Para authPriv se debe proporcionar auth_key y priv_key")
+        usm_kwargs.update({
+            "authKey": auth_key,
+            "authProtocol": auth_protocol,
+            "privKey": priv_key,
+            "privProtocol": priv_protocol,
+        })
+    # En noAuthNoPriv no se agrega nada
+    
+    # 3) Creación de UsmUserData
+    try:
+        user_data = UsmUserData(user, **usm_kwargs)
+    except Exception as e:
+        # Aquí te dice si alguno de los parámetros está mal
+        print("[ERROR] al crear UsmUserData:", e)
+        traceback.print_exc()
+        raise
+
+    try: 
+        # --- Ejecución del SET ---
+        iterator = await set_cmd(
+            SnmpEngine(),
+            user_data,
+            await UdpTransportTarget.create((ip, 161)),
+            ContextData(),
+            ObjectType(ObjectIdentity(oid_numeric), pysnmp_type(cast_value))
+        )
+    except Exception as e:
+        print("[ERROR] fallo interno en get_cmd:", e)
+        traceback.print_exc()
+        raise
 
     errorIndication, errorStatus, errorIndex, varBinds = iterator
 
