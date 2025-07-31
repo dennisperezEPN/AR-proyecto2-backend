@@ -95,20 +95,25 @@ def trap_receiver(loop: asyncio.AbstractEventLoop):
 
     def cbFun(snmpEngine, stateReference, contextEngineId, contextName, varBinds, cbCtx):
         print("Entrando en cbFun")
+
+        # 1. Sacar la IP/puerto de origen
+        transportDomain, transportAddress = snmpEngine.msgAndPduDsp.get_transport_info(stateReference)
+        src_ip, src_port = transportAddress
+
         try:
+           # 2. Convertir varBinds a lista de dicts
             vb_list = [
                 {"oid": oid.prettyPrint(), "value": val.prettyPrint()}
                 for oid, val in varBinds
             ]
 
-            # En AsyncioDispatcher la dirección viene en cbCtx (diccionario)
-            source = cbCtx.get('transportAddress', ('unknown', 0))[0] if cbCtx else 'unknown'
-            
+            # 3. Armar el objeto trap con la IP
             trap = {
-                    "timestamp": asyncio.get_event_loop().time(),
-                    "source": source,
-                    "varBinds": vb_list
-            }
+                "timestamp": asyncio.get_event_loop().time(),
+                "source_ip": src_ip,
+                "source_port": src_port,
+                "varBinds": vb_list
+            } 
             # Encolar en el loop principal SIN get_event_loop() aquí
             print("🔥 Trap recibido en Python:", trap)
             asyncio.run_coroutine_threadsafe(trap_queue.put(trap), loop) 
