@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
+from pysnmp.carrier.asyncio.dgram import udp
 
 from controller import run_snmp_get, run_snmp_getnext, run_snmp_set
 
@@ -84,7 +85,7 @@ def trap_receiver(loop: asyncio.AbstractEventLoop):
         privProtocol=config.usmNoPrivProtocol
     )
     config.addV1System(snmpEngine, 'my-area', 'public')
-
+    print('El valor de snmpEngine es: ', snmpEngine.snmpEngineID.prettyPrint())
     # Escucha traps en UDP/162
     config.addTransport(
         snmpEngine,
@@ -93,14 +94,19 @@ def trap_receiver(loop: asyncio.AbstractEventLoop):
     )
 
     def cbFun(snmpEngine, stateReference, contextEngineId, contextName, varBinds, cbCtx):
+        print("Entrando en cbFun")
         try:
             vb_list = [
                 {"oid": oid.prettyPrint(), "value": val.prettyPrint()}
                 for oid, val in varBinds
             ]
+
+            # En AsyncioDispatcher la dirección viene en cbCtx (diccionario)
+            source = cbCtx.get('transportAddress', ('unknown', 0))[0] if cbCtx else 'unknown'
+            
             trap = {
                     "timestamp": asyncio.get_event_loop().time(),
-                    "source": stateReference.transportAddress[0],
+                    "source": source,
                     "varBinds": vb_list
             }
             # Encolar en el loop principal SIN get_event_loop() aquí
