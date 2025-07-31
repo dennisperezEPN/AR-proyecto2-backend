@@ -110,8 +110,7 @@ def trap_receiver(loop: asyncio.AbstractEventLoop):
             # 3. Armar el objeto trap con la IP
             trap = {
                 "timestamp": asyncio.get_event_loop().time(),
-                "source_ip": src_ip,
-                "source_port": src_port,
+                "source": f"{src_ip}",
                 "varBinds": vb_list
             } 
             # Encolar en el loop principal SIN get_event_loop() aquí
