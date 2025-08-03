@@ -1,6 +1,12 @@
 import threading
 import asyncio
 import json
+import logging
+from pysnmp import debug
+
+# Activa todos los logs detallados
+#debug.set_logger(debug.Debug('all'))
+#logging.basicConfig(level=logging.DEBUG)
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +23,8 @@ from pysnmp.hlapi.v3arch.asyncio import (
     usmHMACMD5AuthProtocol, usmHMACSHAAuthProtocol,
     usmDESPrivProtocol, usmAesCfb128Protocol
 )
+from pysnmp.entity.engine import SnmpEngine
+from pysnmp.proto.rfc1902 import OctetString
 
 # PySNMP de bajo nivel para el listener de traps
 from pysnmp.entity import engine, config
@@ -29,6 +37,7 @@ origins = [
     "http://localhost:8080",
     "http://localhost:8000",
     "http://127.0.0.1:8080",
+    "http://192.168.30.2:8080",
     # otros orígenes que necesites...
 ]
 
@@ -75,16 +84,51 @@ def trap_receiver(loop: asyncio.AbstractEventLoop):
     thread_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(thread_loop)
 
-    snmpEngine = engine.SnmpEngine()
+    snmpEngine = SnmpEngine()
+    #router_engine_id = OctetString(hexValue='80001f8880b237e761f420846800000000') ESTE ES DESDE EL CENTOS
+    #EL SIGUIENTE ES DESDE EL engineID propio del router
+    #router_engine_id = OctetString(hexValue='800000090300AABBCC000100')
+    
+    # Diccionario de routers con sus respectivas configuraciones y engineID
+    routers_config = {
+    # R1:
+        '800000090300aabbcc000100': {
+            'username': 'UsuarioTrap',
+            'authKey': '0123456789',
+            'authProtocol': usmHMACSHAAuthProtocol,
+            'privProtocol': usmNoPrivProtocol
+        },
+    # R2:
+        '800000090300AABBCC000200': {
+            'username': 'UsuarioTrap',
+            'authKey': '0123456789',
+            'authProtocol': usmHMACSHAAuthProtocol,
+            'privProtocol': usmNoPrivProtocol
+        },
+    # R3: 
+        '800000090300AABBCC000300': {
+            'username': 'UsuarioTrap',
+            'authKey': '0123456789',
+            'authProtocol': usmHMACSHAAuthProtocol,
+            'privProtocol': usmNoPrivProtocol
+        },
+        # Se puede agregar más routers aquí
+    }
+    
 
-    # SNMPv3 sin auth/priv para ejemplo y v2c "public"
-    config.addV3User(
-        snmpEngine,
-        userName='v3user',
-        authProtocol=config.usmNoAuthProtocol,
-        privProtocol=config.usmNoPrivProtocol
-    )
+    # Registrar cada router según su engineID
+    for engine_id_hex, conf in routers_config.items():
+        engine_id = OctetString(hexValue=engine_id_hex)
+        config.addV3User(
+            snmpEngine,
+            userName=conf['username'],
+            authKey=conf['authKey'],
+            authProtocol=conf['authProtocol'],
+            privProtocol=conf['privProtocol'],
+            securityEngineId=engine_id
+        )
     config.addV1System(snmpEngine, 'my-area', 'public')
+    
     print('El valor de snmpEngine es: ', snmpEngine.snmpEngineID.prettyPrint())
     # Escucha traps en UDP/162
     config.addTransport(
@@ -95,7 +139,6 @@ def trap_receiver(loop: asyncio.AbstractEventLoop):
 
     def cbFun(snmpEngine, stateReference, contextEngineId, contextName, varBinds, cbCtx):
         print("Entrando en cbFun")
-
         # 1. Sacar la IP/puerto de origen
         transportDomain, transportAddress = snmpEngine.msgAndPduDsp.get_transport_info(stateReference)
         src_ip, src_port = transportAddress
