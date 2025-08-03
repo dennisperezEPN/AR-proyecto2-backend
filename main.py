@@ -89,7 +89,7 @@ def trap_receiver(loop: asyncio.AbstractEventLoop):
     #EL SIGUIENTE ES DESDE EL engineID propio del router
     #router_engine_id = OctetString(hexValue='800000090300AABBCC000100')
     
-    # Diccionario de routers con sus respectivas configuraciones y engineID
+    # Diccionario de routers y dispositivos con sus respectivas configuraciones y engineID
     routers_config = {
     # R1:
         '800000090300aabbcc000100': {
@@ -112,7 +112,21 @@ def trap_receiver(loop: asyncio.AbstractEventLoop):
             'authProtocol': usmHMACSHAAuthProtocol,
             'privProtocol': usmNoPrivProtocol
         },
-        # Se puede agregar más routers aquí
+    # PC2: 
+        '80001f8880b237e761f420846800000000': {
+            'username': 'ubuntuA',
+            'authKey': '1234567890',
+            'authProtocol': usmHMACMD5AuthProtocol,
+            'privProtocol': usmNoPrivProtocol
+        },
+    # PC1: 
+        '80001f88808e936d0fd94e366800000000': {
+            'username': 'ubuntuA',
+            'authKey': '1234567890',
+            'authProtocol': usmHMACMD5AuthProtocol,
+            'privProtocol': usmNoPrivProtocol
+        },
+        # Se puede agregar más routers o dispositivos aquí
     }
     
 
