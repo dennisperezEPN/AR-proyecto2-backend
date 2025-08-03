@@ -81,9 +81,13 @@ async def run_snmp_get(
 
     else:
         result = []
-        for varBind in varBinds:
-            result.append(" = ".join([x.prettyPrint() for x in varBind]))
-        return result
+        for oid, val in varBinds:
+            if isinstance(val, OctetString):
+                texto = val.asOctets().decode('utf-8', errors='ignore')
+                result.append(f"{oid.prettyPrint()} = {texto}")
+            else:
+                result.append(f"{oid.prettyPrint()} = {val.prettyPrint()}")
+        return result 
 
 
 
@@ -154,23 +158,24 @@ async def run_snmp_getnext(
         print("[ERROR] fallo interno en get_cmd:", e)
         traceback.print_exc()
         raise
+    
+    # 4) Itera sobre el iterador asincrónico
+    result = []
+    for oid, val in varBinds:
+        # Si de verdad no quieres filtrar nada, ni EndOfMibView, ni NoSuchInstance,
+        # quitas este if. Pero normalmente conviene al menos salir si es fin de MIB:
+        if isinstance(val, (EndOfMibView, NoSuchInstance)):
+            break
 
-    errorIndication, errorStatus, errorIndex, varBinds = iterator
+        if isinstance(val, OctetString):
+            texto = val.asOctets().decode('utf-8', errors='ignore')
+        else:
+            texto = val.prettyPrint()
 
-    if errorIndication:
-        raise Exception(f"SNMP error: {errorIndication}")
+        result.append(f"{oid.prettyPrint()} = {texto}")
 
-    elif errorStatus:
-        raise Exception(
-            f"{errorStatus.prettyPrint()} at {errorIndex and varBinds[int(errorIndex) - 1][0] or '?'}"
-        )
-
-    else:
-        # Retorna el siguiente OID y su valor como lista de strings
-        result = []
-        for varBind in varBinds:
-            result.append(" = ".join([x.prettyPrint() for x in varBind]))
-        return result
+    return result 
+     
         
 
 async def run_snmp_set(
