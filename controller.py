@@ -1,22 +1,21 @@
 from pysnmp.hlapi.v3arch.asyncio import *
-
 from pysnmp.proto.rfc1902 import (
     Integer, OctetString, IpAddress, Counter32,
     Gauge32, TimeTicks, Opaque, Counter64, Bits
 )
+import traceback
 
 async def run_snmp_get(
-        ip, 
-        user, 
-        oid_numeric,
-        *,
-        security_level: str = "noAuthNoPriv",
-        auth_key: str = None,
-        priv_key: str = None,
-        auth_protocol = usmNoAuthProtocol,
-        priv_protocol = usmNoPrivProtocol,
+    ip, 
+    user, 
+    oid_numeric,
+    *,
+    security_level: str = "noAuthNoPriv",
+    auth_key: str = None,
+    priv_key: str = None,
+    auth_protocol=usmNoAuthProtocol,
+    priv_protocol=usmNoPrivProtocol,
 ):
-    # Se construyen los parametros de USM segun el nivel especificado
     usm_kwargs = {}
 
     if security_level == "authNoPriv":
@@ -36,16 +35,13 @@ async def run_snmp_get(
             "privProtocol": priv_protocol,
         })
 
-    # 3) Creación de UsmUserData
     try:
         user_data = UsmUserData(user, **usm_kwargs)
     except Exception as e:
-        # Aquí te dice si alguno de los parámetros está mal
         print("[ERROR] al crear UsmUserData:", e)
         traceback.print_exc()
         raise
 
-    # 4) Ejecución del GET
     try:
         iterator = await get_cmd(
             SnmpEngine(),
@@ -54,52 +50,49 @@ async def run_snmp_get(
             ContextData(),
             ObjectType(ObjectIdentity(oid_numeric))
         )
-        # --- DEBUG AÑADIDO ---
         errorIndication, errorStatus, errorIndex, varBinds = iterator
         print("[SNMP REPLY] errorIndication:", errorIndication)
         print("[SNMP REPLY] errorStatus:   ", errorStatus and errorStatus.prettyPrint())
         print("[SNMP REPLY] errorIndex:    ", errorIndex)
-        # Si hay varBinds aunque haya error, también los muestro
         print("[SNMP REPLY] varBinds:      ", [
             (oid.prettyPrint(), val.prettyPrint()) for oid, val in varBinds or []
         ])
-        # --- FIN DEBUG ---
     except Exception as e:
         print("[ERROR] fallo interno en get_cmd:", e)
         traceback.print_exc()
         raise
 
-    errorIndication, errorStatus, errorIndex, varBinds = iterator
-
     if errorIndication:
         raise Exception(f"SNMP error: {errorIndication}")
-
     elif errorStatus:
-       raise Exception(
+        raise Exception(
             f"{errorStatus.prettyPrint()} at {errorIndex and varBinds[int(errorIndex) - 1][0] or '?'}"
-        ) 
-
+        )
     else:
         result = []
-        for varBind in varBinds:
-            result.append(" = ".join([x.prettyPrint() for x in varBind]))
+        for oid, val in varBinds:
+            if isinstance(val, OctetString):
+                try:
+                    val_str = val.asOctets().decode('utf-8', errors='replace')
+                except Exception:
+                    val_str = val.prettyPrint()
+            else:
+                val_str = val.prettyPrint()
+            result.append(f"{oid.prettyPrint()} = {val_str}")
         return result
 
 
-
 async def run_snmp_getnext(
-        ip, 
-        user, 
-        oid_numeric,
-        *,
-        security_level: str = "noAuthNoPriv",
-        auth_key: str = None,
-        priv_key: str = None,
-        auth_protocol = usmNoAuthProtocol,
-        priv_protocol = usmNoPrivProtocol,        
+    ip, 
+    user, 
+    oid_numeric,
+    *,
+    security_level: str = "noAuthNoPriv",
+    auth_key: str = None,
+    priv_key: str = None,
+    auth_protocol=usmNoAuthProtocol,
+    priv_protocol=usmNoPrivProtocol,
 ):
-
-    # Se construyen los parametros de USM segun el nivel especificado
     usm_kwargs = {}
 
     if security_level == "authNoPriv":
@@ -119,16 +112,13 @@ async def run_snmp_getnext(
             "privProtocol": priv_protocol,
         })
 
-    # 3) Creación de UsmUserData
     try:
         user_data = UsmUserData(user, **usm_kwargs)
     except Exception as e:
-        # Aquí te dice si alguno de los parámetros está mal
         print("[ERROR] al crear UsmUserData:", e)
         traceback.print_exc()
         raise
-   
-    # 4) Ejecución del GETNEXT
+
     try:
         iterator = await next_cmd(
             SnmpEngine(),
@@ -136,41 +126,46 @@ async def run_snmp_getnext(
             await UdpTransportTarget.create((ip, 161)),
             ContextData(),
             ObjectType(ObjectIdentity(oid_numeric)),
-            lexicographicMode=False,  # para que solo devuelva el siguiente OID, no todo el árbol
-            maxCalls=1  # para obtener solo un resultado
+            lexicographicMode=False,
+            maxCalls=1
         )
-
-        # --- DEBUG AÑADIDO ---
         errorIndication, errorStatus, errorIndex, varBinds = iterator
         print("[SNMP REPLY] errorIndication:", errorIndication)
         print("[SNMP REPLY] errorStatus:   ", errorStatus and errorStatus.prettyPrint())
         print("[SNMP REPLY] errorIndex:    ", errorIndex)
-        # Si hay varBinds aunque haya error, también los muestro
         print("[SNMP REPLY] varBinds:      ", [
             (oid.prettyPrint(), val.prettyPrint()) for oid, val in varBinds or []
         ])
-        # --- FIN DEBUG ---
     except Exception as e:
-        print("[ERROR] fallo interno en get_cmd:", e)
+        print("[ERROR] fallo interno en next_cmd:", e)
         traceback.print_exc()
         raise
 
-    errorIndication, errorStatus, errorIndex, varBinds = iterator
-
     if errorIndication:
         raise Exception(f"SNMP error: {errorIndication}")
-
     elif errorStatus:
         raise Exception(
             f"{errorStatus.prettyPrint()} at {errorIndex and varBinds[int(errorIndex) - 1][0] or '?'}"
         )
-
     else:
-        # Retorna el siguiente OID y su valor como lista de strings
         result = []
-        for varBind in varBinds:
-            result.append(" = ".join([x.prettyPrint() for x in varBind]))
+        for oid, val in varBinds:
+            if isinstance(val, OctetString):
+                try:
+                    val_str = val.asOctets().decode('utf-8', errors='replace')
+                except Exception:
+                    val_str = val.prettyPrint()
+            else:
+                val_str = val.prettyPrint()
+            result.append(f"{oid.prettyPrint()} = {val_str}")
         return result
+
+
+        # Retorna el siguiente OID y su valor como lista de strings
+        #result = []
+        #for varBind in varBinds:
+        #    result.append(" = ".join([x.prettyPrint() for x in varBind]))
+        #return result
         
 
 async def run_snmp_set(
